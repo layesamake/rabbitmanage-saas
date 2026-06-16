@@ -11,7 +11,7 @@ export const Login: React.FC = () => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -20,7 +20,7 @@ export const Login: React.FC = () => {
       return;
     }
 
-    const success = loginUser(email, password);
+    const success = await loginUser(email, password);
     if (success) {
       navigate('/');
     } else {
@@ -28,10 +28,10 @@ export const Login: React.FC = () => {
     }
   };
 
-  const handleQuickLogin = (demoEmail: string) => {
+  const handleQuickLogin = async (demoEmail: string) => {
     setEmail(demoEmail);
-    setPassword('admin');
-    const success = loginUser(demoEmail, 'admin');
+    setPassword('admin123');
+    const success = await loginUser(demoEmail, 'admin123');
     if (success) {
       navigate('/');
     }

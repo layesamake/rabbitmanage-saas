@@ -23,7 +23,7 @@ export const Register: React.FC = () => {
     }
   }, [searchParams]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -37,7 +37,7 @@ export const Register: React.FC = () => {
       return;
     }
 
-    const success = registerUser({
+    const success = await registerUser({
       email,
       password,
       name,

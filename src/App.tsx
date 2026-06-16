@@ -24,6 +24,8 @@ import { Onboarding } from './pages/Onboarding';
 import { Aide } from './pages/Aide';
 import { Apropos } from './pages/Apropos';
 
+import { Loader2 } from 'lucide-react';
+
 // SaaS Pages
 import { LandingPage } from './pages/LandingPage';
 import { Login } from './pages/Login';
@@ -31,10 +33,22 @@ import { Register } from './pages/Register';
 
 function App() {
   const theme = useStore((state) => state.theme);
+  const initializeSession = useStore((state) => state.initializeSession);
+  const isLoading = useStore((state) => state.isLoading);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
-  }, [theme]);
+    initializeSession();
+  }, [theme, initializeSession]);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-[#0B0F19] text-white flex flex-col justify-center items-center gap-4">
+        <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
+        <span className="text-xs font-bold uppercase tracking-wider text-gray-400">Chargement de vos données...</span>
+      </div>
+    );
+  }
 
   return (
     <BrowserRouter>

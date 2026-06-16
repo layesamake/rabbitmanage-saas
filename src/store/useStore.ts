@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { cheptelData, santeData, alertesData } from '../data/mockData';
+import { supabase } from '../lib/supabase';
 
 export interface Animal {
   id: string;
@@ -72,7 +72,6 @@ export interface TeamMember {
 export interface User {
   id: string;
   email: string;
-  password?: string;
   name: string;
   farmName: string;
   plan: 'free' | 'pro' | 'enterprise';
@@ -80,22 +79,9 @@ export interface User {
   teamMembers?: TeamMember[];
 }
 
-interface UserSpecificData {
-  animals: Animal[];
-  soins: any[];
-  alertes: any[];
-  transactions: Transaction[];
-  saillies: Saillie[];
-  portees: Portee[];
-  races: string[];
-  expenseCategories: string[];
-  incomeCategories: string[];
-}
-
 interface AppState {
-  users: User[];
   currentUser: User | null;
-  usersData: Record<string, UserSpecificData>;
+  isLoading: boolean;
   
   // Active user data
   animals: Animal[];
@@ -112,124 +98,219 @@ interface AppState {
   hasOnboarded: boolean;
 
   // Authentication & Plan Actions
-  registerUser: (user: Omit<User, 'id' | 'trialEnd'> & { password?: string }) => boolean;
-  loginUser: (email: string, password?: string) => boolean;
-  logoutUser: () => void;
-  updateUserPlan: (plan: 'free' | 'pro' | 'enterprise') => void;
-  addTeamMember: (member: Omit<TeamMember, 'status'>) => void;
+  registerUser: (userData: { email: string; password?: string; name: string; farmName: string; plan: 'free' | 'pro' | 'enterprise' }) => Promise<boolean>;
+  loginUser: (email: string, password?: string) => Promise<boolean>;
+  logoutUser: () => Promise<void>;
+  updateUserPlan: (plan: 'free' | 'pro' | 'enterprise') => Promise<void>;
+  addTeamMember: (member: Omit<TeamMember, 'status'>) => Promise<void>;
   setOnboarded: (value: boolean) => void;
+  loadUserData: (userId: string, email: string) => Promise<void>;
+  initializeSession: () => Promise<void>;
   
   // App Logic Actions
-  addRace: (race: string) => void;
-  addExpenseCategory: (category: string) => void;
-  addIncomeCategory: (category: string) => void;
-  addAnimal: (animal: Animal) => void;
-  updateAnimal: (id: string, animal: Partial<Animal>) => void;
-  removeAnimal: (id: string) => void;
-  removeAlerte: (id: number) => void;
-  addTransaction: (transaction: Transaction) => void;
-  updateTransaction: (id: string, transaction: Partial<Transaction>) => void;
-  removeTransaction: (id: string) => void;
-  addSoin: (soin: any) => void;
-  updateSoin: (id: number, soin: Partial<any>) => void;
-  removeSoin: (id: number) => void;
-  addSaillie: (saillie: Saillie) => void;
-  updateSaillie: (id: number, saillie: Partial<Saillie>) => void;
-  removeSaillie: (id: number) => void;
-  addPortee: (portee: Portee) => void;
-  updatePortee: (id: string, portee: Partial<Portee>) => void;
-  removePortee: (id: string) => void;
+  addRace: (race: string) => Promise<void>;
+  addExpenseCategory: (category: string) => Promise<void>;
+  addIncomeCategory: (category: string) => Promise<void>;
+  addAnimal: (animal: Animal) => Promise<void>;
+  updateAnimal: (id: string, animal: Partial<Animal>) => Promise<void>;
+  removeAnimal: (id: string) => Promise<void>;
+  removeAlerte: (id: number) => Promise<void>;
+  addTransaction: (transaction: Transaction) => Promise<void>;
+  updateTransaction: (id: string, transaction: Partial<Transaction>) => Promise<void>;
+  removeTransaction: (id: string) => Promise<void>;
+  addSoin: (soin: any) => Promise<void>;
+  updateSoin: (id: number, soin: Partial<any>) => Promise<void>;
+  removeSoin: (id: number) => Promise<void>;
+  addSaillie: (saillie: Saillie) => Promise<void>;
+  updateSaillie: (id: number, saillie: Partial<Saillie>) => Promise<void>;
+  removeSaillie: (id: number) => Promise<void>;
+  addPortee: (portee: Portee) => Promise<void>;
+  updatePortee: (id: string, portee: Partial<Portee>) => Promise<void>;
+  removePortee: (id: string) => Promise<void>;
   setTheme: (theme: string) => void;
+  resetData: () => Promise<void>;
   importData: (data: string) => boolean;
   exportData: () => string;
-  resetData: () => void;
 }
 
-// Initial mock data setups for pre-configured users
-const initialMockData: UserSpecificData = {
-  animals: cheptelData.animals,
-  soins: santeData.soins,
-  alertes: alertesData,
-  transactions: [
-    { id: '1', date: new Date().toISOString().split('T')[0], type: 'EXPENSE', category: 'Alimentation', amount: 15000, description: 'Sacs de granulés' },
-    { id: '2', date: new Date().toISOString().split('T')[0], type: 'INCOME', category: 'Vente', amount: 35000, description: 'Vente de 5 lapins de chair' }
-  ],
-  saillies: [
-    { id: 1, female: 'F-012', male: 'M-004', status: 'Gestation confirmée', statusBadgeColor: 'primary', date: '16/05/2026', expectedDate: '16/06/2026' },
-    { id: 2, female: 'F-008', male: 'M-002, M-006', status: 'En attente', statusBadgeColor: 'secondary', date: '18/05/2026', hasControlToday: true, type: 'Double passage' },
-    { id: 3, female: 'F-021', male: 'M-003', status: 'Échec', statusBadgeColor: 'danger', date: '05/05/2026' }
-  ],
-  portees: [
-    { id: 'P-014', status: 'En cours', female: 'F-012', age: '21 jours', effectif: '8 vivants', sevrage: '20/06/2026', badgeColor: 'secondary' },
-    { id: 'P-009', status: 'À sevrer', female: 'F-008', effectif: '5 lapereaux vivants', badgeColor: 'warning' }
-  ],
-  races: ['Néo-Zélandais', 'Californien', 'Géant des Flandres', 'Race locale', 'Croisé'],
-  expenseCategories: ['Alimentation (Granulés/Foin)', 'Pharmacie / Médicaments', 'Matériel / Équipement', 'Achat Animaux', 'Autre'],
-  incomeCategories: ['Vente Lapins de Chair', 'Vente Reproducteurs', 'Vente Fumier', 'Autre'],
-};
-
-const initialEnterpriseMockData: UserSpecificData = {
-  animals: [
-    ...cheptelData.animals,
-    {
-      id: 'F-030',
-      name: 'Duchesse',
-      gender: 'F',
-      status: 'Actif',
-      type: 'Femelle • Néo-Zélandais',
-      location: 'Cage A4',
-      badgeColor: 'brand-primary',
-      robe: 'Blanc pur'
-    }
-  ],
-  soins: santeData.soins,
-  alertes: alertesData,
-  transactions: [
-    { id: '1', date: new Date().toISOString().split('T')[0], type: 'INCOME', category: 'Vente', amount: 125000, description: 'Vente cheptel reproducteurs' }
-  ],
-  saillies: [],
-  portees: [],
-  races: ['Néo-Zélandais', 'Californien', 'Géant des Flandres', 'Bélier Français', 'Race locale'],
-  expenseCategories: ['Alimentation (Granulés/Foin)', 'Pharmacie / Médicaments', 'Matériel / Équipement', 'Achat Animaux', 'Autre'],
-  incomeCategories: ['Vente Lapins de Chair', 'Vente Reproducteurs', 'Vente Fumier', 'Autre'],
-};
-
-const defaultUsers: User[] = [
-  {
-    id: 'user-free',
-    email: 'eleveur@saas.com',
-    password: 'admin',
-    name: 'Jean Éleveur',
-    farmName: 'La Garenne Moderne',
-    plan: 'free',
-    trialEnd: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
-    teamMembers: []
+// Data Mappers (snake_case from Supabase <=> camelCase for UI)
+const mappers = {
+  animal: {
+    fromDB: (db: any): Animal => ({
+      id: db.id,
+      status: db.status,
+      type: db.type,
+      location: db.location,
+      badgeColor: db.badge_color,
+      image: db.image,
+      name: db.name,
+      gender: db.gender,
+      race: db.race,
+      age: db.age,
+      weight: db.weight,
+      naissance: db.naissance,
+      origine: db.origine,
+      cage: db.cage,
+      robe: db.robe,
+      observations: db.observations
+    }),
+    toDB: (animal: Animal, userId: string) => ({
+      id: animal.id,
+      user_id: userId,
+      status: animal.status,
+      type: animal.type,
+      location: animal.location,
+      badge_color: animal.badgeColor,
+      image: animal.image,
+      name: animal.name,
+      gender: animal.gender,
+      race: animal.race,
+      age: animal.age,
+      weight: animal.weight,
+      naissance: animal.naissance,
+      origine: animal.origine,
+      cage: animal.cage,
+      robe: animal.robe,
+      observations: animal.observations
+    })
   },
-  {
-    id: 'user-elite',
-    email: 'elite@saas.com',
-    password: 'admin',
-    name: 'Sophie Directrice',
-    farmName: 'Lapins Cunicoles Élite',
-    plan: 'enterprise',
-    trialEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-    teamMembers: [
-      { name: 'Pierre Ouvrier', email: 'pierre@saas.com', role: 'Ouvrier', status: 'Actif' },
-      { name: 'Marc Gérant', email: 'marc@saas.com', role: 'Gérant', status: 'Actif' },
-      { name: 'Julie Vétérinaire', email: 'julie@saas.com', role: 'Ouvrier', status: 'En attente' }
-    ]
+  saillie: {
+    fromDB: (db: any): Saillie => ({
+      id: db.id,
+      female: db.female,
+      male: db.male,
+      status: db.status,
+      statusBadgeColor: db.status_badge_color,
+      date: db.date,
+      expectedDate: db.expected_date,
+      hasControlToday: db.has_control_today,
+      type: db.type
+    }),
+    toDB: (s: Saillie, userId: string) => ({
+      user_id: userId,
+      female: s.female,
+      male: s.male,
+      status: s.status,
+      status_badge_color: s.statusBadgeColor,
+      date: s.date,
+      expected_date: s.expectedDate,
+      has_control_today: s.hasControlToday,
+      type: s.type
+    })
+  },
+  portee: {
+    fromDB: (db: any): Portee => ({
+      id: db.id,
+      status: db.status,
+      female: db.female,
+      age: db.age,
+      effectif: db.effectif,
+      sevrage: db.sevrage,
+      badgeColor: db.badge_color,
+      dateMiseBas: db.date_mise_bas,
+      totalNes: db.total_nes,
+      nesVivants: db.nes_vivants,
+      mortsNes: db.morts_nes,
+      cage: db.cage,
+      observations: db.observations
+    }),
+    toDB: (p: Portee, userId: string) => ({
+      id: p.id,
+      user_id: userId,
+      status: p.status,
+      female: p.female,
+      age: p.age,
+      effectif: p.effectif,
+      sevrage: p.sevrage,
+      badge_color: p.badgeColor,
+      date_mise_bas: p.dateMiseBas,
+      total_nes: p.totalNes,
+      nes_vivants: p.nesVivants,
+      morts_nes: p.mortsNes,
+      cage: p.cage,
+      observations: p.observations
+    })
+  },
+  soin: {
+    fromDB: (db: any) => ({
+      id: db.id,
+      animalId: db.animal_id,
+      type: db.type,
+      category: db.category,
+      status: db.status,
+      statusColor: db.status_color,
+      date: db.date,
+      isToday: db.is_today,
+      isLate: db.is_late
+    }),
+    toDB: (s: any, userId: string) => ({
+      user_id: userId,
+      animal_id: s.animalId,
+      type: s.type,
+      category: s.category,
+      status: s.status,
+      status_color: s.statusColor,
+      date: s.date,
+      is_today: s.isToday,
+      is_late: s.isLate
+    })
+  },
+  alerte: {
+    fromDB: (db: any) => ({
+      id: db.id,
+      type: db.type,
+      typeColor: db.type_color,
+      subject: db.subject,
+      title: db.title,
+      subtitle: db.subtitle,
+      icon: db.icon,
+      time: db.time,
+      primaryAction: db.primary_action,
+      secondaryAction: db.secondary_action,
+      primaryColor: db.primary_color,
+      description: db.description
+    }),
+    toDB: (a: any, userId: string) => ({
+      user_id: userId,
+      type: a.type,
+      type_color: a.typeColor,
+      subject: a.subject,
+      title: a.title,
+      subtitle: a.subtitle,
+      icon: a.icon,
+      time: a.time,
+      primary_action: a.primaryAction,
+      secondary_action: a.secondaryAction,
+      primary_color: a.primaryColor,
+      description: a.description
+    })
+  },
+  transaction: {
+    fromDB: (db: any): Transaction => ({
+      id: db.id,
+      date: db.date,
+      type: db.type,
+      category: db.category,
+      amount: Number(db.amount),
+      description: db.description
+    }),
+    toDB: (t: Transaction, userId: string) => ({
+      id: t.id,
+      user_id: userId,
+      date: t.date,
+      type: t.type,
+      category: t.category,
+      amount: t.amount,
+      description: t.description
+    })
   }
-];
+};
 
 export const useStore = create<AppState>()(
   persist(
     (set, get) => ({
-      users: defaultUsers,
       currentUser: null,
-      usersData: {
-        'user-free': initialMockData,
-        'user-elite': initialEnterpriseMockData,
-      },
+      isLoading: false,
 
       // Active state
       animals: [],
@@ -247,84 +328,66 @@ export const useStore = create<AppState>()(
 
       setOnboarded: (value) => set({ hasOnboarded: value }),
 
-      registerUser: (userData) => {
-        const emailLower = userData.email.toLowerCase();
-        const exists = get().users.some((u) => u.email.toLowerCase() === emailLower);
-        if (exists) return false;
+      registerUser: async (userData) => {
+        try {
+          set({ isLoading: true });
+          const { data, error } = await supabase.auth.signUp({
+            email: userData.email,
+            password: userData.password || 'admin123',
+            options: {
+              data: {
+                name: userData.name,
+                farmName: userData.farmName,
+                plan: userData.plan
+              }
+            }
+          });
 
-        const newId = `user-${Date.now()}`;
-        const newUser: User = {
-          id: newId,
-          email: emailLower,
-          password: userData.password || 'admin',
-          name: userData.name,
-          farmName: userData.farmName,
-          plan: userData.plan,
-          trialEnd: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
-          teamMembers: []
-        };
-
-        const newUserSpecificData: UserSpecificData = {
-          animals: [],
-          soins: [],
-          alertes: [],
-          transactions: [],
-          saillies: [],
-          portees: [],
-          races: ['Néo-Zélandais', 'Californien', 'Géant des Flandres', 'Race locale', 'Croisé'],
-          expenseCategories: ['Alimentation (Granulés/Foin)', 'Pharmacie / Médicaments', 'Matériel / Équipement', 'Achat Animaux', 'Autre'],
-          incomeCategories: ['Vente Lapins de Chair', 'Vente Reproducteurs', 'Vente Fumier', 'Autre'],
-        };
-
-        set((state) => ({
-          users: [...state.users, newUser],
-          usersData: {
-            ...state.usersData,
-            [newId]: newUserSpecificData
+          if (error || !data.user) {
+            console.error('Error signing up:', error);
+            set({ isLoading: false });
+            return false;
           }
-        }));
 
-        // Log in the newly registered user
-        get().loginUser(userData.email, userData.password);
-        return true;
+          // Trigger handle_new_user executes on DB.
+          // Wait a brief moment for trigger, then log in.
+          await get().loginUser(userData.email, userData.password || 'admin123');
+          set({ isLoading: false });
+          return true;
+        } catch (e) {
+          console.error(e);
+          set({ isLoading: false });
+          return false;
+        }
       },
 
-      loginUser: (email, password) => {
-        const user = get().users.find(
-          (u) => u.email.toLowerCase() === email.toLowerCase() && u.password === password
-        );
-        if (!user) return false;
+      loginUser: async (email, password) => {
+        try {
+          set({ isLoading: true });
+          const { data, error } = await supabase.auth.signInWithPassword({
+            email,
+            password: password || 'admin123'
+          });
 
-        const userData = get().usersData[user.id] || {
-          animals: [],
-          soins: [],
-          alertes: [],
-          transactions: [],
-          saillies: [],
-          portees: [],
-          races: ['Néo-Zélandais', 'Californien', 'Géant des Flandres', 'Race locale', 'Croisé'],
-          expenseCategories: ['Alimentation (Granulés/Foin)', 'Pharmacie / Médicaments', 'Matériel / Équipement', 'Achat Animaux', 'Autre'],
-          incomeCategories: ['Vente Lapins de Chair', 'Vente Reproducteurs', 'Vente Fumier', 'Autre'],
-        };
+          if (error || !data.user) {
+            console.error('Error signing in:', error);
+            set({ isLoading: false });
+            return false;
+          }
 
-        set({
-          currentUser: user,
-          animals: userData.animals,
-          soins: userData.soins,
-          alertes: userData.alertes,
-          transactions: userData.transactions,
-          saillies: userData.saillies,
-          portees: userData.portees,
-          races: userData.races,
-          expenseCategories: userData.expenseCategories,
-          incomeCategories: userData.incomeCategories,
-          hasOnboarded: true
-        });
-
-        return true;
+          await get().loadUserData(data.user.id, data.user.email || email);
+          set({ isLoading: false });
+          return true;
+        } catch (e) {
+          console.error(e);
+          set({ isLoading: false });
+          return false;
+        }
       },
 
-      logoutUser: () => {
+      logoutUser: async () => {
+        set({ isLoading: true });
+        await supabase.auth.signOut();
         set({
           currentUser: null,
           animals: [],
@@ -336,310 +399,493 @@ export const useStore = create<AppState>()(
           races: [],
           expenseCategories: [],
           incomeCategories: [],
+          isLoading: false
         });
       },
 
-      updateUserPlan: (plan) => {
-        const currentUser = get().currentUser;
-        if (!currentUser) return;
+      loadUserData: async (userId, email) => {
+        try {
+          // Fetch Profile
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', userId)
+            .single();
 
-        const updatedUser = { ...currentUser, plan };
-        set((state) => ({
-          currentUser: updatedUser,
-          users: state.users.map((u) => u.id === currentUser.id ? updatedUser : u)
-        }));
+          // Fetch Cheptel
+          const { data: animals } = await supabase.from('animals').select('*').eq('user_id', userId);
+          // Fetch Saillies
+          const { data: saillies } = await supabase.from('saillies').select('*').eq('user_id', userId);
+          // Fetch Portees
+          const { data: portees } = await supabase.from('portees').select('*').eq('user_id', userId);
+          // Fetch Soins
+          const { data: soins } = await supabase.from('soins').select('*').eq('user_id', userId);
+          // Fetch Transactions
+          const { data: transactions } = await supabase.from('transactions').select('*').eq('user_id', userId);
+          // Fetch Alertes
+          const { data: alertes } = await supabase.from('alertes').select('*').eq('user_id', userId);
+          // Fetch races, categories
+          const { data: dbRaces } = await supabase.from('races').select('name').eq('user_id', userId);
+          const { data: dbExpenseCats } = await supabase.from('expense_categories').select('name').eq('user_id', userId);
+          const { data: dbIncomeCats } = await supabase.from('income_categories').select('name').eq('user_id', userId);
+          // Fetch team members
+          const { data: teamMembers } = await supabase.from('team_members').select('*').eq('user_id', userId);
+
+          const mappedAnimals = (animals || []).map(mappers.animal.fromDB);
+          const mappedSaillies = (saillies || []).map(mappers.saillie.fromDB);
+          const mappedPortees = (portees || []).map(mappers.portee.fromDB);
+          const mappedSoins = (soins || []).map(mappers.soin.fromDB);
+          const mappedTransactions = (transactions || []).map(mappers.transaction.fromDB);
+          const mappedAlertes = (alertes || []).map(mappers.alerte.fromDB);
+
+          const defaultRaces = ['Néo-Zélandais', 'Californien', 'Géant des Flandres', 'Race locale', 'Croisé'];
+          const defaultExpenseCats = ['Alimentation (Granulés/Foin)', 'Pharmacie / Médicaments', 'Matériel / Équipement', 'Achat Animaux', 'Autre'];
+          const defaultIncomeCats = ['Vente Lapins de Chair', 'Vente Reproducteurs', 'Vente Fumier', 'Autre'];
+
+          set({
+            currentUser: {
+              id: userId,
+              email: email,
+              name: profile?.name || 'Éleveur',
+              farmName: profile?.farm_name || 'Mon Élevage',
+              plan: profile?.plan || 'free',
+              trialEnd: profile?.trial_end || new Date().toISOString(),
+              teamMembers: (teamMembers || []).map(tm => ({
+                name: tm.name,
+                email: tm.email,
+                role: tm.role,
+                status: tm.status
+              }))
+            },
+            animals: mappedAnimals,
+            saillies: mappedSaillies,
+            portees: mappedPortees,
+            soins: mappedSoins,
+            transactions: mappedTransactions,
+            alertes: mappedAlertes,
+            races: dbRaces && dbRaces.length > 0 ? dbRaces.map(r => r.name) : defaultRaces,
+            expenseCategories: dbExpenseCats && dbExpenseCats.length > 0 ? dbExpenseCats.map(r => r.name) : defaultExpenseCats,
+            incomeCategories: dbIncomeCats && dbIncomeCats.length > 0 ? dbIncomeCats.map(r => r.name) : defaultIncomeCats,
+            hasOnboarded: true
+          });
+        } catch (e) {
+          console.error('Failed to load user data from Supabase:', e);
+        }
       },
 
-      addTeamMember: (member) => {
-        const currentUser = get().currentUser;
-        if (!currentUser) return;
-
-        const nextMembers = currentUser.teamMembers || [];
-        const updatedMembers = [...nextMembers, { ...member, status: 'En attente' as const }];
-        const updatedUser = { ...currentUser, teamMembers: updatedMembers };
-
-        set((state) => ({
-          currentUser: updatedUser,
-          users: state.users.map((u) => (u.id === currentUser.id ? updatedUser : u))
-        }));
+      initializeSession: async () => {
+        try {
+          set({ isLoading: true });
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user) {
+            await get().loadUserData(session.user.id, session.user.email || '');
+          }
+          set({ isLoading: false });
+        } catch (e) {
+          console.error('Failed to initialize session:', e);
+          set({ isLoading: false });
+        }
       },
 
-      addRace: (race) => set((state) => {
+      updateUserPlan: async (plan) => {
+        const user = get().currentUser;
+        if (!user) return;
+
+        const { error } = await supabase
+          .from('profiles')
+          .update({ plan })
+          .eq('id', user.id);
+
+        if (!error) {
+          const updatedUser = { ...user, plan };
+          set({ currentUser: updatedUser });
+        } else {
+          console.error('Error updating plan:', error);
+        }
+      },
+
+      addTeamMember: async (member) => {
+        const user = get().currentUser;
+        if (!user) return;
+
+        const { error } = await supabase
+          .from('team_members')
+          .insert({
+            user_id: user.id,
+            name: member.name,
+            email: member.email,
+            role: member.role,
+            status: 'En attente'
+          });
+
+        if (!error) {
+          const updatedMembers: TeamMember[] = [
+            ...(user.teamMembers || []),
+            { ...member, status: 'En attente' }
+          ];
+          set({
+            currentUser: {
+              ...user,
+              teamMembers: updatedMembers
+            }
+          });
+        } else {
+          console.error('Error adding team member:', error);
+        }
+      },
+
+      addRace: async (race) => {
+        const user = get().currentUser;
+        if (!user) return;
+
         const cleaned = race.trim();
-        if (!cleaned) return {};
-        const exists = state.races.some((r) => r.toLowerCase() === cleaned.toLowerCase());
-        if (exists) return {};
-        const nextRaces = [...state.races, cleaned];
+        if (!cleaned) return;
+        const exists = get().races.some((r) => r.toLowerCase() === cleaned.toLowerCase());
+        if (exists) return;
 
-        const nextUsersData = { ...state.usersData };
-        if (state.currentUser) {
-          nextUsersData[state.currentUser.id] = {
-            ...nextUsersData[state.currentUser.id],
-            races: nextRaces
-          };
+        const { error } = await supabase
+          .from('races')
+          .insert({ user_id: user.id, name: cleaned });
+
+        if (!error) {
+          set((state) => ({ races: [...state.races, cleaned] }));
         }
-        return { races: nextRaces, usersData: nextUsersData };
-      }),
+      },
 
-      addExpenseCategory: (category) => set((state) => {
+      addExpenseCategory: async (category) => {
+        const user = get().currentUser;
+        if (!user) return;
+
         const cleaned = category.trim();
-        if (!cleaned) return {};
-        const exists = state.expenseCategories.some((c) => c.toLowerCase() === cleaned.toLowerCase());
-        if (exists) return {};
-        const nextCategories = [...state.expenseCategories, cleaned];
+        if (!cleaned) return;
+        const exists = get().expenseCategories.some((c) => c.toLowerCase() === cleaned.toLowerCase());
+        if (exists) return;
 
-        const nextUsersData = { ...state.usersData };
-        if (state.currentUser) {
-          nextUsersData[state.currentUser.id] = {
-            ...nextUsersData[state.currentUser.id],
-            expenseCategories: nextCategories
-          };
+        const { error } = await supabase
+          .from('expense_categories')
+          .insert({ user_id: user.id, name: cleaned });
+
+        if (!error) {
+          set((state) => ({ expenseCategories: [...state.expenseCategories, cleaned] }));
         }
-        return { expenseCategories: nextCategories, usersData: nextUsersData };
-      }),
+      },
 
-      addIncomeCategory: (category) => set((state) => {
+      addIncomeCategory: async (category) => {
+        const user = get().currentUser;
+        if (!user) return;
+
         const cleaned = category.trim();
-        if (!cleaned) return {};
-        const exists = state.incomeCategories.some((c) => c.toLowerCase() === cleaned.toLowerCase());
-        if (exists) return {};
-        const nextCategories = [...state.incomeCategories, cleaned];
+        if (!cleaned) return;
+        const exists = get().incomeCategories.some((c) => c.toLowerCase() === cleaned.toLowerCase());
+        if (exists) return;
 
-        const nextUsersData = { ...state.usersData };
-        if (state.currentUser) {
-          nextUsersData[state.currentUser.id] = {
-            ...nextUsersData[state.currentUser.id],
-            incomeCategories: nextCategories
-          };
-        }
-        return { incomeCategories: nextCategories, usersData: nextUsersData };
-      }),
+        const { error } = await supabase
+          .from('income_categories')
+          .insert({ user_id: user.id, name: cleaned });
 
-      addAnimal: (animal) => set((state) => {
-        const nextAnimals = [...state.animals, animal];
-        const nextUsersData = { ...state.usersData };
-        if (state.currentUser) {
-          nextUsersData[state.currentUser.id] = {
-            ...nextUsersData[state.currentUser.id],
-            animals: nextAnimals
-          };
+        if (!error) {
+          set((state) => ({ incomeCategories: [...state.incomeCategories, cleaned] }));
         }
-        return { animals: nextAnimals, usersData: nextUsersData };
-      }),
-      
-      updateAnimal: (id, updatedAnimal) => set((state) => {
-        const nextAnimals = state.animals.map((a) => a.id === id ? { ...a, ...updatedAnimal } : a);
-        const nextUsersData = { ...state.usersData };
-        if (state.currentUser) {
-          nextUsersData[state.currentUser.id] = {
-            ...nextUsersData[state.currentUser.id],
-            animals: nextAnimals
-          };
-        }
-        return { animals: nextAnimals, usersData: nextUsersData };
-      }),
+      },
 
-      removeAnimal: (id) => set((state) => {
-        const nextAnimals = state.animals.filter((a) => a.id !== id);
-        const nextUsersData = { ...state.usersData };
-        if (state.currentUser) {
-          nextUsersData[state.currentUser.id] = {
-            ...nextUsersData[state.currentUser.id],
-            animals: nextAnimals
-          };
-        }
-        return { animals: nextAnimals, usersData: nextUsersData };
-      }),
+      addAnimal: async (animal) => {
+        const user = get().currentUser;
+        if (!user) return;
 
-      removeAlerte: (id) => set((state) => {
-        const nextAlertes = state.alertes.filter((a) => a.id !== id);
-        const nextUsersData = { ...state.usersData };
-        if (state.currentUser) {
-          nextUsersData[state.currentUser.id] = {
-            ...nextUsersData[state.currentUser.id],
-            alertes: nextAlertes
-          };
-        }
-        return { alertes: nextAlertes, usersData: nextUsersData };
-      }),
+        const dbData = mappers.animal.toDB(animal, user.id);
+        const { error } = await supabase
+          .from('animals')
+          .insert(dbData);
 
-      addTransaction: (transaction) => set((state) => {
-        const nextTransactions = [transaction, ...state.transactions];
-        const nextUsersData = { ...state.usersData };
-        if (state.currentUser) {
-          nextUsersData[state.currentUser.id] = {
-            ...nextUsersData[state.currentUser.id],
-            transactions: nextTransactions
-          };
+        if (!error) {
+          set((state) => ({ animals: [...state.animals, animal] }));
+        } else {
+          console.error('Error adding animal:', error);
         }
-        return { transactions: nextTransactions, usersData: nextUsersData };
-      }),
+      },
 
-      updateTransaction: (id, updatedTransaction) => set((state) => {
-        const nextTransactions = state.transactions.map((t) => t.id === id ? { ...t, ...updatedTransaction } : t);
-        const nextUsersData = { ...state.usersData };
-        if (state.currentUser) {
-          nextUsersData[state.currentUser.id] = {
-            ...nextUsersData[state.currentUser.id],
-            transactions: nextTransactions
-          };
-        }
-        return { transactions: nextTransactions, usersData: nextUsersData };
-      }),
+      updateAnimal: async (id, updatedAnimal) => {
+        const user = get().currentUser;
+        if (!user) return;
 
-      removeTransaction: (id) => set((state) => {
-        const nextTransactions = state.transactions.filter((t) => t.id !== id);
-        const nextUsersData = { ...state.usersData };
-        if (state.currentUser) {
-          nextUsersData[state.currentUser.id] = {
-            ...nextUsersData[state.currentUser.id],
-            transactions: nextTransactions
-          };
-        }
-        return { transactions: nextTransactions, usersData: nextUsersData };
-      }),
+        const animal = get().animals.find(a => a.id === id);
+        if (!animal) return;
 
-      addSoin: (soin) => set((state) => {
-        const nextSoins = [soin, ...state.soins];
-        const nextUsersData = { ...state.usersData };
-        if (state.currentUser) {
-          nextUsersData[state.currentUser.id] = {
-            ...nextUsersData[state.currentUser.id],
-            soins: nextSoins
-          };
-        }
-        return { soins: nextSoins, usersData: nextUsersData };
-      }),
+        const mergedAnimal = { ...animal, ...updatedAnimal };
+        const dbData = mappers.animal.toDB(mergedAnimal, user.id);
 
-      updateSoin: (id, updatedSoin) => set((state) => {
-        const nextSoins = state.soins.map((s) => s.id === id ? { ...s, ...updatedSoin } : s);
-        const nextUsersData = { ...state.usersData };
-        if (state.currentUser) {
-          nextUsersData[state.currentUser.id] = {
-            ...nextUsersData[state.currentUser.id],
-            soins: nextSoins
-          };
-        }
-        return { soins: nextSoins, usersData: nextUsersData };
-      }),
+        const { error } = await supabase
+          .from('animals')
+          .update(dbData)
+          .eq('id', id);
 
-      removeSoin: (id) => set((state) => {
-        const nextSoins = state.soins.filter((s) => s.id !== id);
-        const nextUsersData = { ...state.usersData };
-        if (state.currentUser) {
-          nextUsersData[state.currentUser.id] = {
-            ...nextUsersData[state.currentUser.id],
-            soins: nextSoins
-          };
+        if (!error) {
+          set((state) => ({
+            animals: state.animals.map(a => a.id === id ? mergedAnimal : a)
+          }));
+        } else {
+          console.error('Error updating animal:', error);
         }
-        return { soins: nextSoins, usersData: nextUsersData };
-      }),
+      },
 
-      addSaillie: (saillie) => set((state) => {
-        const nextSaillies = [...state.saillies, saillie];
-        const nextUsersData = { ...state.usersData };
-        if (state.currentUser) {
-          nextUsersData[state.currentUser.id] = {
-            ...nextUsersData[state.currentUser.id],
-            saillies: nextSaillies
-          };
-        }
-        return { saillies: nextSaillies, usersData: nextUsersData };
-      }),
+      removeAnimal: async (id) => {
+        const { error } = await supabase
+          .from('animals')
+          .delete()
+          .eq('id', id);
 
-      updateSaillie: (id, updatedSaillie) => set((state) => {
-        const nextSaillies = state.saillies.map((s) => s.id === id ? { ...s, ...updatedSaillie } : s);
-        const nextUsersData = { ...state.usersData };
-        if (state.currentUser) {
-          nextUsersData[state.currentUser.id] = {
-            ...nextUsersData[state.currentUser.id],
-            saillies: nextSaillies
-          };
+        if (!error) {
+          set((state) => ({
+            animals: state.animals.filter(a => a.id !== id)
+          }));
         }
-        return { saillies: nextSaillies, usersData: nextUsersData };
-      }),
+      },
 
-      removeSaillie: (id) => set((state) => {
-        const nextSaillies = state.saillies.filter((s) => s.id !== id);
-        const nextUsersData = { ...state.usersData };
-        if (state.currentUser) {
-          nextUsersData[state.currentUser.id] = {
-            ...nextUsersData[state.currentUser.id],
-            saillies: nextSaillies
-          };
-        }
-        return { saillies: nextSaillies, usersData: nextUsersData };
-      }),
+      removeAlerte: async (id) => {
+        const { error } = await supabase
+          .from('alertes')
+          .delete()
+          .eq('id', id);
 
-      addPortee: (portee) => set((state) => {
-        const nextPortees = [...state.portees, portee];
-        const nextUsersData = { ...state.usersData };
-        if (state.currentUser) {
-          nextUsersData[state.currentUser.id] = {
-            ...nextUsersData[state.currentUser.id],
-            portees: nextPortees
-          };
+        if (!error) {
+          set((state) => ({
+            alertes: state.alertes.filter(a => a.id !== id)
+          }));
         }
-        return { portees: nextPortees, usersData: nextUsersData };
-      }),
+      },
 
-      updatePortee: (id, updatedPortee) => set((state) => {
-        const nextPortees = state.portees.map((p) => p.id === id ? { ...p, ...updatedPortee } : p);
-        const nextUsersData = { ...state.usersData };
-        if (state.currentUser) {
-          nextUsersData[state.currentUser.id] = {
-            ...nextUsersData[state.currentUser.id],
-            portees: nextPortees
-          };
-        }
-        return { portees: nextPortees, usersData: nextUsersData };
-      }),
+      addTransaction: async (transaction) => {
+        const user = get().currentUser;
+        if (!user) return;
 
-      removePortee: (id) => set((state) => {
-        const nextPortees = state.portees.filter((p) => p.id !== id);
-        const nextUsersData = { ...state.usersData };
-        if (state.currentUser) {
-          nextUsersData[state.currentUser.id] = {
-            ...nextUsersData[state.currentUser.id],
-            portees: nextPortees
-          };
+        const dbData = mappers.transaction.toDB(transaction, user.id);
+        const { error } = await supabase
+          .from('transactions')
+          .insert(dbData);
+
+        if (!error) {
+          set((state) => ({
+            transactions: [transaction, ...state.transactions]
+          }));
         }
-        return { portees: nextPortees, usersData: nextUsersData };
-      }),
+      },
+
+      updateTransaction: async (id, updatedTransaction) => {
+        const user = get().currentUser;
+        if (!user) return;
+
+        const tx = get().transactions.find(t => t.id === id);
+        if (!tx) return;
+
+        const mergedTx = { ...tx, ...updatedTransaction };
+        const dbData = mappers.transaction.toDB(mergedTx, user.id);
+
+        const { error } = await supabase
+          .from('transactions')
+          .update(dbData)
+          .eq('id', id);
+
+        if (!error) {
+          set((state) => ({
+            transactions: state.transactions.map(t => t.id === id ? mergedTx : t)
+          }));
+        }
+      },
+
+      removeTransaction: async (id) => {
+        const { error } = await supabase
+          .from('transactions')
+          .delete()
+          .eq('id', id);
+
+        if (!error) {
+          set((state) => ({
+            transactions: state.transactions.filter(t => t.id !== id)
+          }));
+        }
+      },
+
+      addSoin: async (soin) => {
+        const user = get().currentUser;
+        if (!user) return;
+
+        const dbData = mappers.soin.toDB(soin, user.id);
+        const { data, error } = await supabase
+          .from('soins')
+          .insert(dbData)
+          .select()
+          .single();
+
+        if (!error && data) {
+          set((state) => ({
+            soins: [mappers.soin.fromDB(data), ...state.soins]
+          }));
+        }
+      },
+
+      updateSoin: async (id, updatedSoin) => {
+        const user = get().currentUser;
+        if (!user) return;
+
+        const soin = get().soins.find(s => s.id === id);
+        if (!soin) return;
+
+        const mergedSoin = { ...soin, ...updatedSoin };
+        const dbData = mappers.soin.toDB(mergedSoin, user.id);
+
+        const { error } = await supabase
+          .from('soins')
+          .update(dbData)
+          .eq('id', id);
+
+        if (!error) {
+          set((state) => ({
+            soins: state.soins.map(s => s.id === id ? mergedSoin : s)
+          }));
+        }
+      },
+
+      removeSoin: async (id) => {
+        const { error } = await supabase
+          .from('soins')
+          .delete()
+          .eq('id', id);
+
+        if (!error) {
+          set((state) => ({
+            soins: state.soins.filter(s => s.id !== id)
+          }));
+        }
+      },
+
+      addSaillie: async (saillie) => {
+        const user = get().currentUser;
+        if (!user) return;
+
+        const dbData = mappers.saillie.toDB(saillie, user.id);
+        const { data, error } = await supabase
+          .from('saillies')
+          .insert(dbData)
+          .select()
+          .single();
+
+        if (!error && data) {
+          set((state) => ({
+            saillies: [...state.saillies, mappers.saillie.fromDB(data)]
+          }));
+        }
+      },
+
+      updateSaillie: async (id, updatedSaillie) => {
+        const user = get().currentUser;
+        if (!user) return;
+
+        const saillie = get().saillies.find(s => s.id === id);
+        if (!saillie) return;
+
+        const mergedSaillie = { ...saillie, ...updatedSaillie };
+        const dbData = mappers.saillie.toDB(mergedSaillie, user.id);
+
+        const { error } = await supabase
+          .from('saillies')
+          .update(dbData)
+          .eq('id', id);
+
+        if (!error) {
+          set((state) => ({
+            saillies: state.saillies.map(s => s.id === id ? mergedSaillie : s)
+          }));
+        }
+      },
+
+      removeSaillie: async (id) => {
+        const { error } = await supabase
+          .from('saillies')
+          .delete()
+          .eq('id', id);
+
+        if (!error) {
+          set((state) => ({
+            saillies: state.saillies.filter(s => s.id !== id)
+          }));
+        }
+      },
+
+      addPortee: async (portee) => {
+        const user = get().currentUser;
+        if (!user) return;
+
+        const dbData = mappers.portee.toDB(portee, user.id);
+        const { error } = await supabase
+          .from('portees')
+          .insert(dbData);
+
+        if (!error) {
+          set((state) => ({
+            portees: [...state.portees, portee]
+          }));
+        }
+      },
+
+      updatePortee: async (id, updatedPortee) => {
+        const user = get().currentUser;
+        if (!user) return;
+
+        const portee = get().portees.find(p => p.id === id);
+        if (!portee) return;
+
+        const mergedPortee = { ...portee, ...updatedPortee };
+        const dbData = mappers.portee.toDB(mergedPortee, user.id);
+
+        const { error } = await supabase
+          .from('portees')
+          .update(dbData)
+          .eq('id', id);
+
+        if (!error) {
+          set((state) => ({
+            portees: state.portees.map(p => p.id === id ? mergedPortee : p)
+          }));
+        }
+      },
+
+      removePortee: async (id) => {
+        const { error } = await supabase
+          .from('portees')
+          .delete()
+          .eq('id', id);
+
+        if (!error) {
+          set((state) => ({
+            portees: state.portees.filter(p => p.id !== id)
+          }));
+        }
+      },
 
       setTheme: (theme) => set({ theme }),
 
-      importData: (jsonData) => {
-        try {
-          const parsed = JSON.parse(jsonData);
-          if (parsed && parsed.state) {
-            set(parsed.state);
-            const currentUser = get().currentUser;
-            if (currentUser && parsed.state.animals) {
-              // Also sync user data entry
-              set((state) => {
-                const nextUsersData = { ...state.usersData };
-                nextUsersData[currentUser.id] = {
-                  animals: parsed.state.animals,
-                  soins: parsed.state.soins || [],
-                  alertes: parsed.state.alertes || [],
-                  transactions: parsed.state.transactions || [],
-                  saillies: parsed.state.saillies || [],
-                  portees: parsed.state.portees || [],
-                  races: parsed.state.races || [],
-                  expenseCategories: parsed.state.expenseCategories || [],
-                  incomeCategories: parsed.state.incomeCategories || [],
-                };
-                return { usersData: nextUsersData };
-              });
-            }
-            return true;
-          }
-          return false;
-        } catch (e) {
-          console.error("Failed to parse imported data", e);
-          return false;
-        }
+      resetData: async () => {
+        const user = get().currentUser;
+        if (!user) return;
+
+        set({ isLoading: true });
+        await supabase.from('animals').delete().eq('user_id', user.id);
+        await supabase.from('portees').delete().eq('user_id', user.id);
+        await supabase.from('saillies').delete().eq('user_id', user.id);
+        await supabase.from('soins').delete().eq('user_id', user.id);
+        await supabase.from('transactions').delete().eq('user_id', user.id);
+        await supabase.from('alertes').delete().eq('user_id', user.id);
+
+        set({
+          animals: [],
+          santeStats: { tauxMortalite: 0, traitementsEnCours: 0, alertesSanitaires: 0 },
+          soins: [],
+          alertes: [],
+          transactions: [],
+          saillies: [],
+          portees: [],
+          isLoading: false
+        });
       },
 
       exportData: () => {
@@ -652,54 +898,33 @@ export const useStore = create<AppState>()(
             transactions: state.transactions,
             saillies: state.saillies,
             portees: state.portees,
-            theme: state.theme,
-            hasOnboarded: state.hasOnboarded,
             races: state.races,
             expenseCategories: state.expenseCategories,
             incomeCategories: state.incomeCategories,
           },
-          version: 1,
+          version: 2,
           timestamp: new Date().toISOString()
         };
         return JSON.stringify(exportObj, null, 2);
       },
 
-      resetData: () => {
-        set({
-          animals: [],
-          santeStats: { tauxMortalite: 0, traitementsEnCours: 0, alertesSanitaires: 0 },
-          soins: [],
-          alertes: [],
-          transactions: [],
-          saillies: [],
-          portees: [],
-          races: ['Néo-Zélandais', 'Californien', 'Géant des Flandres', 'Race locale', 'Croisé'],
-          expenseCategories: ['Alimentation (Granulés/Foin)', 'Pharmacie / Médicaments', 'Matériel / Équipement', 'Achat Animaux', 'Autre'],
-          incomeCategories: ['Vente Lapins de Chair', 'Vente Reproducteurs', 'Vente Fumier', 'Autre'],
-        });
-
-        const currentUser = get().currentUser;
-        if (currentUser) {
-          set((state) => {
-            const nextUsersData = { ...state.usersData };
-            nextUsersData[currentUser.id] = {
-              animals: [],
-              soins: [],
-              alertes: [],
-              transactions: [],
-              saillies: [],
-              portees: [],
-              races: ['Néo-Zélandais', 'Californien', 'Géant des Flandres', 'Race locale', 'Croisé'],
-              expenseCategories: ['Alimentation (Granulés/Foin)', 'Pharmacie / Médicaments', 'Matériel / Équipement', 'Achat Animaux', 'Autre'],
-              incomeCategories: ['Vente Lapins de Chair', 'Vente Reproducteurs', 'Vente Fumier', 'Autre'],
-            };
-            return { usersData: nextUsersData };
-          });
+      importData: (jsonData) => {
+        try {
+          const parsed = JSON.parse(jsonData);
+          if (parsed && parsed.state) {
+            set(parsed.state);
+            return true;
+          }
+          return false;
+        } catch (e) {
+          console.error("Échec du parsing des données importées", e);
+          return false;
         }
       },
     }),
     {
-      name: 'gestion-lapins-saas-storage',
+      name: 'gestion-lapins-saas-supabase-theme',
+      partialize: (state) => ({ theme: state.theme, hasOnboarded: state.hasOnboarded }),
     }
   )
 );
