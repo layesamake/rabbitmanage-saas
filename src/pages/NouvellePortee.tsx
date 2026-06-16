@@ -5,13 +5,15 @@ import { useStore } from '../store/useStore';
 import { useToast } from '../components/ui/Toast';
 import { Wizard } from '../components/ui/Wizard';
 import type { WizardStep } from '../components/ui/Wizard';
+import { PaywallModal } from '../components/ui/PaywallModal';
 
 export const NouvellePortee: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams();
   const isEditMode = !!id;
-  const { animals, portees, addPortee, updatePortee } = useStore();
+  const { animals, portees, addPortee, updatePortee, currentUser } = useStore();
   const { showToast } = useToast();
+  const [showPaywall, setShowPaywall] = useState(false);
 
   const existingPortee = isEditMode ? portees.find((p) => p.id === id) : null;
   const femelles = animals.filter(a => a.gender === 'F' || a?.type?.startsWith('Femelle'));
@@ -41,6 +43,12 @@ export const NouvellePortee: React.FC = () => {
   };
 
   const handleComplete = () => {
+    // Intercept with Paywall if quota exceeded
+    if (currentUser?.plan === 'free' && !isEditMode && portees.filter(p => p.status === 'En cours').length >= 2) {
+      setShowPaywall(true);
+      return;
+    }
+
     const birthDate = new Date(formData.dateMiseBas);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -250,11 +258,20 @@ export const NouvellePortee: React.FC = () => {
   ];
 
   return (
-    <Wizard 
-      steps={steps} 
-      onComplete={handleComplete} 
-      onCancel={() => navigate(-1)} 
-      completeText={isEditMode ? "Mettre à jour" : "Créer la portée"}
-    />
+    <div className="h-full">
+      <Wizard 
+        steps={steps} 
+        onComplete={handleComplete} 
+        onCancel={() => navigate(-1)} 
+        completeText={isEditMode ? "Mettre à jour" : "Créer la portée"}
+      />
+      <PaywallModal
+        isOpen={showPaywall}
+        onClose={() => setShowPaywall(false)}
+        title="Limite de portées atteinte"
+        message="Le plan Gratuit est limité à 2 portées actives simultanément. Passez au plan Pro pour ajouter de nouvelles portées sans limite !"
+        featureName="Ajout de portées"
+      />
+    </div>
   );
 };

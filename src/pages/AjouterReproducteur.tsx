@@ -8,14 +8,16 @@ import { calculateAge } from '../utils/dateUtils';
 import { useToast } from '../components/ui/Toast';
 import { Wizard } from '../components/ui/Wizard';
 import type { WizardStep } from '../components/ui/Wizard';
+import { PaywallModal } from '../components/ui/PaywallModal';
 
 export const AjouterReproducteur: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams();
   const isEditMode = !!id;
-  const { addAnimal, updateAnimal, animals, races, addRace } = useStore();
+  const { addAnimal, updateAnimal, animals, races, addRace, currentUser } = useStore();
   const { showToast } = useToast();
   const existingAnimal = isEditMode ? animals.find((a) => a.id === id) : null;
+  const [showPaywall, setShowPaywall] = useState(false);
 
   const [formData, setFormData] = useState({
     code: existingAnimal?.id || '',
@@ -99,6 +101,12 @@ export const AjouterReproducteur: React.FC = () => {
   };
 
   const handleComplete = () => {
+    // Intercept with Paywall if quota exceeded
+    if (currentUser?.plan === 'free' && !isEditMode && animals.filter(a => a.status !== 'Mort').length >= 5) {
+      setShowPaywall(true);
+      return;
+    }
+
     const imageUrl = photoPreview || 'https://images.unsplash.com/photo-1585110396000-c9fd4e4e5088?auto=format&fit=crop&q=80&w=800';
     const gender = sexe === 'female' ? 'F' : 'M';
     const status = formData.statut;
@@ -436,6 +444,15 @@ export const AjouterReproducteur: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Paywall Modal */}
+      <PaywallModal
+        isOpen={showPaywall}
+        onClose={() => setShowPaywall(false)}
+        title="Limite de reproducteurs atteinte"
+        message="Le plan Gratuit est limité à 5 reproducteurs actifs. Passez au plan Pro pour ajouter de nouveaux reproducteurs sans limite !"
+        featureName="Ajout de reproducteurs"
+      />
     </div>
   );
 };

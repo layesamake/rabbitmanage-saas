@@ -24,6 +24,11 @@ import { Onboarding } from './pages/Onboarding';
 import { Aide } from './pages/Aide';
 import { Apropos } from './pages/Apropos';
 
+// SaaS Pages
+import { LandingPage } from './pages/LandingPage';
+import { Login } from './pages/Login';
+import { Register } from './pages/Register';
+
 function App() {
   const theme = useStore((state) => state.theme);
 
@@ -34,7 +39,11 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="/landing" element={<LandingPage />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
         <Route path="/onboarding" element={<Onboarding />} />
+        
         <Route path="/" element={<AppLayout />}>
           <Route index element={<Dashboard />} />
           <Route path="cheptel" element={<Cheptel />} />

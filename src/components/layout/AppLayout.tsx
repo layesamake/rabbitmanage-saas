@@ -9,7 +9,12 @@ import { WifiOff } from 'lucide-react';
 
 export const AppLayout: React.FC = () => {
   const { isOnline } = useNetworkStatus();
+  const currentUser = useStore(state => state.currentUser);
   const hasOnboarded = useStore(state => state.hasOnboarded);
+
+  if (!currentUser) {
+    return <Navigate to="/landing" replace />;
+  }
 
   if (!hasOnboarded) {
     return <Navigate to="/onboarding" replace />;
